@@ -68,11 +68,11 @@ namespace PPDF.TotalAgility.Connector
             new MenuItemDefinition(
                 ItemId.TotalAgility,
                 "MenuSendToTotalAgility",           // Resources string key → "Send to TotalAgility"
-                "Send To TotalAgility",             // Tooltip (plain string fallback)
+                "Send and Create a Job in TotalAgility",             // Tooltip (plain string fallback)
                 true,                               // Show in toolbar
                 CallbackType.CALLBACK_SAVE,        // Triggers DocAddNew — same pattern as RAI connector
-                "Image_Save",     "Image_Save_150",      "Image_Save_200",
-                "Image_Save_Small","Image_Save_Small_150","Image_Save_Small_200",
+                "Image_TA",     "Image_TA_150",      "Image_TA_200",
+                "Image_TA_Small","Image_TA_Small_150","Image_TA_Small_200",
                 true                                // Enabled even without a document open
             )
         };
