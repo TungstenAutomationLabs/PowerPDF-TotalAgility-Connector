@@ -1,6 +1,6 @@
-# Tungsten Power PDF – Connector for Kofax TotalAgility
+# Tungsten Power PDF – Connector for Tungsten TotalAgility
 
-This repository provides a .NET Framework-based connector for integrating Tungsten Power PDF with Kofax TotalAgility. It allows users to send the currently open PDF document directly to TotalAgility, creating a job on a configured process with a single click from the Power PDF ribbon.
+This repository provides a .NET Framework-based connector for integrating Tungsten Power PDF with Tungsten TotalAgility. It allows users to send the currently open PDF document directly to Tungsten TotalAgility, creating a job on a configured process with a single click from the Power PDF ribbon.
 
 ---
 
@@ -44,9 +44,9 @@ Copy the following files to your Power PDF Connectors folder:
 | `PPDF.TotalAgility.Connector.dll` | `bin\Release\` |
 | `Newtonsoft.Json.dll` | `bin\Release\` |
 
-**Kofax Power PDF 51:**
+**Tungsten Power PDF 51:**
 ```
-C:\Program Files (x86)\Kofax\Power PDF 51\bin\Connectors\
+C:\Program Files (x86)\Tungsten\Power PDF 51\bin\Connectors\
 ```
 
 **Tungsten Power PDF 2025:**
@@ -60,7 +60,7 @@ C:\Program Files\Tungsten\Power PDF 2025\bin\Connectors\
 
 Run from an **elevated (Administrator) command prompt**:
 
-**Kofax Power PDF 51 (32-bit):**
+**Tungsten Power PDF 51 (32-bit):**
 ```
 "C:\Windows\Microsoft.NET\Framework\v4.0.30319\regasm.exe" "[Connectors folder]\PPDF.TotalAgility.Connector.dll" /codebase
 ```
