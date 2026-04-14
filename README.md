@@ -164,7 +164,7 @@ After installation, configure the connector in Power PDF:
 
 | Task | Status |
 |---|---|
-| Build DLL in Visual Studio (AnyCPU, Release) | ✅ |
+
 | Copy DLL and Newtonsoft.Json.dll to Connectors folder | ✅ |
 | Register DLL via regasm (32-bit or 64-bit as appropriate) | ✅ |
 | Update `Publish Mode.xml` | ✅ |
