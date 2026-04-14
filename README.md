@@ -17,19 +17,6 @@ PowerPDF-TotalAgility-Connector/
 
 ---
 
-## 🛠 Build Instructions
-
-1. Open `PowerPDF-TotalAgility-Connector.sln` in Visual Studio 2019 or later
-2. In the project properties:
-   - Set **Platform Target** to `AnyCPU` under Build
-   - Uncheck **Prefer 32-bit**
-   - Ensure `AssemblyInfo.cs` has a valid `AssemblyVersion`
-3. Build the solution in **Release** mode
-
-The output DLL will be located at:
-```
-PPDF.TotalAgility.Connector\bin\Release\PPDF.TotalAgility.Connector.dll
-```
 
 ---
 
