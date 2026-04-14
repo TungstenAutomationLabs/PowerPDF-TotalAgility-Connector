@@ -160,19 +160,7 @@ After installation, configure the connector in Power PDF:
 
 ---
 
-## ✅ Deployment Checklist
 
-| Task | Status |
-|---|---|
-
-| Copy DLL and Newtonsoft.Json.dll to Connectors folder | ✅ |
-| Register DLL via regasm (32-bit or 64-bit as appropriate) | ✅ |
-| Update `Publish Mode.xml` | ✅ |
-| Update `NameAndTitle.xml` | ✅ |
-| Clear cached Publish.xml and restart Power PDF | ✅ |
-| Configure connector (SDK URL, credentials, process) | ✅ |
-
----
 
 ## 📬 Support
 
