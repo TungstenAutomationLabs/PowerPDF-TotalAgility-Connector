@@ -6,21 +6,13 @@ using System.Runtime.InteropServices;
 
 namespace PPDF.TotalAgility.Connector
 {
-    /// <summary>
-    /// Menu item IDs for the TotalAgility connector ribbon.
-    /// </summary>
     public enum ItemId
     {
-        TotalAgility = 1   // "Send to TotalAgility" ribbon button
+        
+        TotalAgility = 1,   // "Send" ribbon button
+        Configure = 2    // "Configure" ribbon button
     }
 
-    /// <summary>
-    /// Defines the static layout of the connector ribbon button.
-    /// Text and tooltip are loaded from string resources.
-    /// Icons are loaded from bitmap resources — same placeholder names
-    /// as the RAI connector; swap the actual bitmaps in Resources.resx
-    /// when a custom TotalAgility icon is ready.
-    /// </summary>
     public class MenuItemDefinition
     {
         public ItemId id;
@@ -57,31 +49,35 @@ namespace PPDF.TotalAgility.Connector
             this.enabledWithoutDoc = enabledWithoutDoc;
         }
 
-        /// <summary>
-        /// Static ribbon layout definition.
-        /// resText / resTooltip are resource string keys resolved at runtime.
-        /// Icon resource names match the existing RAI connector placeholders —
-        /// replace the bitmaps in Resources.resx when a TA icon is available.
-        /// </summary>
         internal static MenuItemDefinition[] menuDefinitions =
         {
+            // Button 1 — Send
             new MenuItemDefinition(
                 ItemId.TotalAgility,
-                "MenuSendToTotalAgility",           // Resources string key → "Send to TotalAgility"
-                "Send and Create a Job in TotalAgility",             // Tooltip (plain string fallback)
-                true,                               // Show in toolbar
-                CallbackType.CALLBACK_SAVE,        // Triggers DocAddNew — same pattern as RAI connector
-                "Image_TA",     "Image_TA_150",      "Image_TA_200",
-                "Image_TA_Small","Image_TA_Small_150","Image_TA_Small_200",
-                true                                // Enabled even without a document open
+                "MenuSendToTotalAgility",
+                "Send document to TotalAgility",
+                true,
+                CallbackType.CALLBACK_SAVE,
+                //"Image_Open", "Image_Open_150", "Image_Open_200",
+                //"Image_Open_Small", "Image_Open_Small_150", "Image_Open_Small_200",
+                "Image_TA",      "Image_TA_150",       "Image_TA_200",
+                "Image_TA_Small","Image_TA_Small_150",  "Image_TA_Small_200",
+                true
+            ),
+            // Button 2 — Configure
+            new MenuItemDefinition(
+                ItemId.Configure,
+                "MenuConfigureTotalAgility",
+                "Configure TotalAgility process and variables",
+                false,
+                CallbackType.CALLBACK_MENUITEM,
+                "Image_TA_Configure",      "Image_TA_Configure_150",       "Image_TA_Configure_200",
+                "Image_TA_Configure_Small","Image_TA_Configure_Small_150",  "Image_TA_Configure_Small_200",
+                true
             )
         };
     }
 
-    /// <summary>
-    /// Typed list of MenuItem objects built from MenuItemDefinition.
-    /// Passed to Power PDF via IDMSConnector.MenuGetMenuItem.
-    /// </summary>
     public class MenuItemList : List<MenuItem>
     {
         public static MenuItemList Create()
@@ -96,11 +92,6 @@ namespace PPDF.TotalAgility.Connector
         }
     }
 
-    /// <summary>
-    /// Resolves a MenuItemDefinition into string and HBITMAP resources
-    /// ready for Power PDF's menu API. Adjusts icon resolution based
-    /// on display DPI (100% / 150% / 200%).
-    /// </summary>
     public class MenuItem
     {
         public int menuItemId;
@@ -122,7 +113,6 @@ namespace PPDF.TotalAgility.Connector
             string resBig = definition.resIconBig;
             string resSmall = definition.resIconSmall;
 
-            // Select the correct DPI-appropriate icon set
             using (System.Drawing.Graphics g =
                 System.Drawing.Graphics.FromHwnd(IntPtr.Zero))
             {
@@ -157,17 +147,19 @@ namespace PPDF.TotalAgility.Connector
         {
             if (string.IsNullOrEmpty(resName)) return string.Empty;
             string val = Resources.Resources.ResourceManager.GetString(resName);
-            // Fall back to the resource key itself if string not found,
-            // so the button always has readable text during development
             return string.IsNullOrEmpty(val) ? resName : val;
         }
 
         private IntPtr GetHBitmapResource(string resName)
         {
-            if (string.IsNullOrEmpty(resName)) return IntPtr.Zero;
-            Bitmap bmp = Resources.Resources.ResourceManager
-                             .GetObject(resName) as Bitmap;
-            return bmp != null ? bmp.GetHbitmap(Color.Black) : IntPtr.Zero;
+            if (String.IsNullOrEmpty(resName))
+                return IntPtr.Zero;
+
+            Bitmap bmp = Resources.Resources.ResourceManager.GetObject(resName) as Bitmap;
+            if (bmp != null)
+                return bmp.GetHbitmap(Color.Transparent);
+            else
+                return IntPtr.Zero;
         }
 
         [DllImport("gdi32.dll")]

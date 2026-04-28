@@ -1,4 +1,4 @@
-﻿using DMSConnector;
+using DMSConnector;
 using Microsoft.Win32;
 using Newtonsoft.Json;
 using System;
@@ -13,48 +13,17 @@ using System.Windows.Forms;
 
 namespace PPDF.TotalAgility.Connector
 {
-    /// <summary>
-    /// Error code constants.
-    /// </summary>
     public abstract class ERRORS
     {
         public const int E_CANCELLED = -2147221492;
     }
 
-    /// <summary>
-    /// Power PDF DMS Connector for Kofax TotalAgility.
-    ///
-    /// Sends the currently open PDF to TotalAgility by creating a job
-    /// on the configured process via CreateJobWithDocuments.
-    ///
-    /// Key design point (matching RAI connector exactly):
-    ///   DocAddNew() is the main action entry point. Power PDF passes the
-    ///   sourceFile path and title directly. The entire API flow runs here:
-    ///     1. Load config from registry
-    ///     2. Show LoadingForm on STA thread
-    ///     3. LogOn → save SessionId → read PDF bytes → CreateJobWithDocuments
-    ///     4. Close LoadingForm → show TAResultForm (success or error)
-    ///
-    ///   MenuAction() handles the ribbon button click but with
-    ///   CALLBACK_MENUITEM the document pipeline calls DocAddNew.
-    ///
-    /// Registration:
-    ///   regasm PPDF.TotalAgility.Connector.dll /codebase
-    /// </summary>
     [ClassInterface(ClassInterfaceType.None)]
     [ComVisible(true)]
     [Guid("A3F7C241-88B2-4D1E-9C3A-7E2B5F0D4C8A")]
     [ProgId("TotalAgility")]
     public class Connector : IDMSConnector, IPropertyPageHandler
     {
-        // ── COM Registration ──────────────────────────────────────────────
-        //
-        // Power PDF is a 32-bit application. On 64-bit Windows, 32-bit apps
-        // store registry entries under WOW6432Node. We must write to that
-        // path explicitly using RegistryView.Registry32 so Power PDF can
-        // discover the connector regardless of whether regasm runs as
-        // 32-bit or 64-bit.
-
         [ComRegisterFunction]
         public static void RegisterAsConnector(Type t)
         {
@@ -82,10 +51,6 @@ namespace PPDF.TotalAgility.Connector
         }
 
         // ── Registry Constants ────────────────────────────────────────────
-        //
-        // User settings are stored under HKCU which has no WOW6432Node
-        // distinction — HKCU is the same for 32-bit and 64-bit processes.
-
         private const string REG_KEY = @"Software\ScanSoft\Connectors\TotalAgility";
         private const string TA_SDK_URL = "TA_SDK_URL";
         private const string TA_USER_ID = "TA_USER_ID";
@@ -94,9 +59,16 @@ namespace PPDF.TotalAgility.Connector
         private const string TA_PROCESS_ID = "TA_PROCESS_ID";
         private const string TA_PROCESS_NAME = "TA_PROCESS_NAME";
         private const string TA_INIT_VARIABLES = "TA_INIT_VARIABLES";
+        private const string TA_SHOW_CONFIRMATION = "TA_SHOW_CONFIRMATION";
+        private const string TA_AUTH_TYPE = "TA_AUTH_TYPE";
+        private const string TA_WINDOWS_USERNAME = "TA_WINDOWS_USERNAME";
+
+        // ── Auth Type Constants ───────────────────────────────────────────
+        private const int AUTH_STANDARD = 0;
+        private const int AUTH_WINDOWS = 1;
+        private const int AUTH_FEDERATED = 2;
 
         // ── State ─────────────────────────────────────────────────────────
-
         protected string _connectorName = "TotalAgility";
         protected string _languageCode;
         protected bool _initialized = false;
@@ -105,21 +77,14 @@ namespace PPDF.TotalAgility.Connector
         protected Dictionary<string, Document> _documents =
             new Dictionary<string, Document>();
 
-        // ── Constructor ───────────────────────────────────────────────────
-
         public Connector() { }
 
         // ── IDMSConnector: Initialization ─────────────────────────────────
-
-        /// <summary>
-        /// Called once by Power PDF when the connector is loaded.
-        /// </summary>
         void IDMSConnector.Init(object application, string LangCode)
         {
             if (!_initialized)
             {
                 _languageCode = LangCode;
-
                 try
                 {
                     CultureInfo cultureInfo = Langs.Iso639_3ToCulture(_languageCode);
@@ -127,17 +92,13 @@ namespace PPDF.TotalAgility.Connector
                         Thread.CurrentThread.CurrentCulture = cultureInfo;
                     Thread.CurrentThread.CurrentUICulture = cultureInfo;
                 }
-                catch { /* non-fatal */ }
+                catch { }
 
                 _menuItems = MenuItemList.Create();
                 _initialized = true;
             }
         }
 
-        /// <summary>
-        /// Called by Power PDF when the connector is unloaded.
-        /// Closes all tracked documents and releases resources.
-        /// </summary>
         void IDMSConnector.Shutdown()
         {
             if (_initialized)
@@ -150,26 +111,10 @@ namespace PPDF.TotalAgility.Connector
         }
 
         // ── IDMSConnector: Properties ─────────────────────────────────────
-
-        /// <summary>
-        /// Returns the connector name shown in Power PDF's connector list.
-        /// </summary>
-        string IDMSConnector.ConnectorName
-        {
-            get { return _connectorName; }
-        }
-
-        /// <summary>
-        /// Receives the parent window handle from Power PDF.
-        /// Used to parent dialogs correctly.
-        /// </summary>
-        int IDMSConnector.ParentWindow
-        {
-            set { _parentWindow = (IntPtr)value; }
-        }
+        string IDMSConnector.ConnectorName { get { return _connectorName; } }
+        int IDMSConnector.ParentWindow { set { _parentWindow = (IntPtr)value; } }
 
         // ── IDMSConnector: Menu ───────────────────────────────────────────
-
         void IDMSConnector.MenuGetNumberOfItems(out int num, out string title)
         {
             num = _menuItems.Count;
@@ -182,9 +127,12 @@ namespace PPDF.TotalAgility.Connector
             out int hIconBig, out int hIconSmall, out bool enabledWithoutDoc)
         {
             if (num < 0 || num >= _menuItems.Count)
+            {
                 throw new ArgumentOutOfRangeException("num");
+            }
 
             MenuItem item = _menuItems[num];
+
             menuItemId = item.menuItemId;
             text = item.text;
             tooltip = item.tooltip;
@@ -193,67 +141,129 @@ namespace PPDF.TotalAgility.Connector
             hIconBig = item.hIconBig.ToInt32();
             hIconSmall = item.hIconSmall.ToInt32();
             enabledWithoutDoc = item.enabledWithoutDoc;
+
+            System.IO.File.AppendAllText(@"C:\Temp\TAConnectorDebug.txt", DateTime.Now + " | MenuGetMenuItem: " + "menuItemId=" + menuItemId +  " text=" + text + " hIconBig=" + hIconBig.ToString("X") + " hIconSmall=" + hIconSmall.ToString("X") +  "\r\n");
         }
 
-        bool IDMSConnector.MenuGetItemState(int menuItemId, string docId)
-        {
-            return true;
-        }
+        bool IDMSConnector.MenuGetItemState(int menuItemId, string docId) => true;
 
         void IDMSConnector.MenuAction(int menuItemId, string docId)
         {
-            // With CALLBACK_SAVE, Power PDF calls DocAddNew directly when the
-            // ribbon button is clicked — MenuAction is not called for our button.
-            // This method is implemented as a no-op to satisfy the interface.
+            if (menuItemId == (int)ItemId.Configure)
+            {
+                IntPtr owner = _parentWindow;
+                System.Threading.Thread thread = new System.Threading.Thread(() =>
+                {
+                    var psForm = new ProcessSelectionForm();
+                    psForm.ShowDialog(new WindowWrapper(owner));
+                    if (owner != IntPtr.Zero)
+                        SetForegroundWindow(owner);
+                });
+                thread.SetApartmentState(System.Threading.ApartmentState.STA);
+                thread.Start();
+                // No Join() — do not block Power PDF UI thread
+            }
         }
 
-        // ── IDMSConnector: DocAddNew — Main Action ────────────────────────
 
-        /// <summary>
-        /// Called by Power PDF when the ribbon button is clicked.
-        /// sourceFile is the full path to the currently open PDF.
-        /// title is the document title shown in Power PDF's tab.
-        ///
-        /// This is where the entire TotalAgility submission flow runs:
-        ///   1. Load config from registry
-        ///   2. Show LoadingForm on its own STA thread
-        ///   3. LogOn fresh → save SessionId to registry
-        ///   4. Read PDF bytes → CreateJobWithDocuments (Base64 inline)
-        ///   5. Close LoadingForm
-        ///   6. Show TAResultForm on its own STA thread (prevents focus loss)
-        ///   7. Restore focus to Power PDF via SetForegroundWindow
-        /// </summary>
+        // ── IDMSConnector: DocAddNew — Main Action ────────────────────────
         string IDMSConnector.DocAddNew(string sourceFile, string title, string[] docProperties)
         {
-            // ── Step 1: Load configuration from registry ──────────────
+            // ── Step 1: Load configuration ────────────────────────────
             string sdkUrl = LoadPlainSetting(TA_SDK_URL);
-            string userId = LoadEncryptedSetting(TA_USER_ID);
-            string password = LoadEncryptedSetting(TA_PASSWORD);
             string processId = LoadPlainSetting(TA_PROCESS_ID);
             string processName = LoadPlainSetting(TA_PROCESS_NAME);
             string initVarsJson = LoadPlainSetting(TA_INIT_VARIABLES);
 
-            if (string.IsNullOrEmpty(sdkUrl) ||
-                string.IsNullOrEmpty(userId) ||
-                string.IsNullOrEmpty(processId))
-            {
-                MessageBox.Show(
-                    "TotalAgility connector is not fully configured.\n\n" +
-                    "Please go to File → Options → Connectors → " +
-                    "Send to TotalAgility\nand complete the setup " +
-                    "(SDK URL, credentials, and process selection).",
-                    "Configuration Required",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-                return "";
-            }
+            string authTypeStr = LoadPlainSetting(TA_AUTH_TYPE);
+            int authType = string.IsNullOrEmpty(authTypeStr)
+                ? AUTH_STANDARD : int.Parse(authTypeStr);
+
+            string userId = LoadEncryptedSetting(TA_USER_ID);
+            string password = LoadEncryptedSetting(TA_PASSWORD);
 
             // ── Step 2: Resolve document name ─────────────────────────
             string documentName = string.IsNullOrEmpty(title)
                 ? Path.GetFileName(sourceFile)
                 : title;
 
-            // ── Step 3: Deserialise saved init variables ───────────────
+            // ── Step 3: Read show confirmation flag (default ON) ───────
+            string showConfFlag = LoadPlainSetting(TA_SHOW_CONFIRMATION);
+            bool showConfirmation = showConfFlag != "0";
+
+            // ── Step 4: Confirmation / process selection flow ──────────
+            bool processConfigured = !string.IsNullOrEmpty(sdkUrl)
+                                  && !string.IsNullOrEmpty(processId);
+
+            if (!processConfigured)
+            {
+                MessageBox.Show(
+                    "No process has been configured.\n\n" +
+                    "Please click the Configure button in the TotalAgility ribbon " +
+                    "to select a process before sending.",
+                    "Process Not Configured",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return "";
+            }
+            else if (showConfirmation)
+            {
+                bool keepLooping = true;
+                while (keepLooping)
+                {
+                    using (var confForm = new ConfirmationForm(documentName, processName))
+                    {
+                        confForm.ShowDialog(new WindowWrapper(_parentWindow));
+
+                        SavePlainSetting(TA_SHOW_CONFIRMATION,
+                            confForm.DoNotShowAgain ? "0" : "1");
+
+                        switch (confForm.Result)
+                        {
+                            case ConfirmationForm.ConfirmationResult.Send:
+                                keepLooping = false;
+                                break;
+
+                            case ConfirmationForm.ConfirmationResult.Cancel:
+                                return "";
+
+                            case ConfirmationForm.ConfirmationResult.Change:
+                                bool changeLoop = true;
+                                while (changeLoop)
+                                {
+                                    var psForm = new ProcessSelectionForm();
+                                    DialogResult psResult =
+                                        psForm.ShowDialog(new WindowWrapper(_parentWindow));
+
+                                    if (psResult != DialogResult.OK)
+                                    {
+                                        changeLoop = false;
+                                        break;
+                                    }
+
+                                    processId = LoadPlainSetting(TA_PROCESS_ID);
+                                    processName = LoadPlainSetting(TA_PROCESS_NAME);
+                                    initVarsJson = LoadPlainSetting(TA_INIT_VARIABLES);
+
+                                    DialogResult ready = MessageBox.Show(
+                                        $"Ready to send \"{documentName}\" to process \"{processName}\"?",
+                                        "Send to TotalAgility",
+                                        MessageBoxButtons.YesNo,
+                                        MessageBoxIcon.Question);
+
+                                    if (ready == DialogResult.Yes)
+                                    {
+                                        changeLoop = false;
+                                        keepLooping = false;
+                                    }
+                                }
+                                break;
+                        }
+                    }
+                }
+            }
+
+            // ── Step 5: Deserialise init variables ────────────────────
             List<TAInputVariable> inputVariables = new List<TAInputVariable>();
             if (!string.IsNullOrEmpty(initVarsJson))
             {
@@ -263,11 +273,10 @@ namespace PPDF.TotalAgility.Connector
                         JsonConvert.DeserializeObject<List<TAInputVariable>>(initVarsJson)
                         ?? new List<TAInputVariable>();
                 }
-                catch { /* non-fatal — proceed with empty list */ }
+                catch { }
             }
 
-            // ── Step 4: Show LoadingForm on a separate STA thread ──────
-            // Matches RAI connector threading pattern exactly.
+            // ── Step 6: Show LoadingForm ───────────────────────────────
             LoadingForm loadingForm = null;
             Thread loadingThread = new Thread(() =>
             {
@@ -277,14 +286,60 @@ namespace PPDF.TotalAgility.Connector
             loadingThread.SetApartmentState(ApartmentState.STA);
             loadingThread.Start();
 
-            // ── Step 5: Call TotalAgility API ─────────────────────────
+            // ── Step 7: Authenticate and call TotalAgility API ────────
+            // TEST DELAY — 5 seconds to verify LoadingForm animation
+            // Remove this Thread.Sleep before production release
+            Thread.Sleep(5000);
+
             TAJobResult jobResult = null;
             try
             {
                 var taService = new TotalAgilityService(sdkUrl);
 
-                TASession session = taService.LogOn(userId, password);
-                SavePlainSetting(TA_SESSION_ID, session.SessionId);
+                // Try saved SessionId first — skip LogOn if still valid
+                TASession session = null;
+                string savedSessionId = LoadPlainSetting(TA_SESSION_ID);
+
+                if (!string.IsNullOrEmpty(savedSessionId))
+                {
+                    try
+                    {
+                        // Validate by calling a lightweight API
+                        taService.GetProcesses(savedSessionId);
+                        session = new TASession
+                        {
+                            SessionId = savedSessionId,
+                            IsValid = true
+                        };
+                    }
+                    catch
+                    {
+                        // SessionId expired — re-authenticate below
+                        session = null;
+                    }
+                }
+
+                if (session == null)
+                {
+                    if (authType == AUTH_STANDARD)
+                    {
+                        session = taService.LogOn(userId, password);
+                    }
+                    else if (authType == AUTH_WINDOWS)
+                    {
+                        string winUser = LoadPlainSetting(TA_WINDOWS_USERNAME);
+                        if (string.IsNullOrEmpty(winUser))
+                            winUser = Environment.UserName;
+                        session = taService.LogOnWithWindowsAD(winUser);
+                    }
+                    else if (authType == AUTH_FEDERATED)
+                    {
+                        string taBaseUrl = taService.GetTaBaseUrl(sdkUrl);
+                        session = taService.LogOnWithFederated(
+                            taBaseUrl, new WindowWrapper(_parentWindow));
+                    }
+                    SavePlainSetting(TA_SESSION_ID, session.SessionId);
+                }
 
                 byte[] pdfBytes = File.ReadAllBytes(sourceFile);
 
@@ -312,12 +367,8 @@ namespace PPDF.TotalAgility.Connector
                     DocumentName = documentName
                 };
             }
-            // ── Step 6: Close LoadingForm, Step 7: Show Result ──────
-            // The result thread is prepared and started INSIDE the finally block,
-            // BEFORE closing the loading form. This means the result form begins
-            // initialising while the loading form is still visible — by the time
-            // the loading form closes, the result form is ready to appear
-            // immediately with no gap and no focus loss.
+
+            // ── Step 8: Close LoadingForm, show Result ─────────────────
             TAJobResult resultToShow = jobResult;
             IntPtr ownerHwnd = _parentWindow;
             Thread resultThread = new Thread(() =>
@@ -334,10 +385,7 @@ namespace PPDF.TotalAgility.Connector
 
             try
             {
-                // Start result thread first — form begins loading immediately
                 resultThread.Start();
-
-                // Now close the loading form
                 if (loadingForm != null && loadingForm.InvokeRequired)
                     loadingForm.Invoke(new Action(() => loadingForm.Close()));
                 else if (loadingForm != null)
@@ -346,19 +394,16 @@ namespace PPDF.TotalAgility.Connector
             catch { }
 
             loadingThread.Join();
-
-            // Wait for user to close the result form
             resultThread.Join();
 
-            // ── Step 8: Restore focus to Power PDF ────────────────────
+            // ── Step 9: Restore focus to Power PDF ────────────────────
             if (_parentWindow != IntPtr.Zero)
                 SetForegroundWindow(_parentWindow);
 
             return "";
         }
 
-        // ── IDMSConnector: Document Lifecycle ────────────────────────────
-
+        // ── IDMSConnector: Document Lifecycle ─────────────────────────────
         void IDMSConnector.DocOpen(string docId, OpenMode mode)
         {
             if (_documents.TryGetValue(docId, out Document doc))
@@ -374,10 +419,7 @@ namespace PPDF.TotalAgility.Connector
             }
         }
 
-        void IDMSConnector.DocModified(string docId)
-        {
-            // No action needed
-        }
+        void IDMSConnector.DocModified(string docId) { }
 
         string IDMSConnector.DocGetLocalFile(string docId)
         {
@@ -409,7 +451,7 @@ namespace PPDF.TotalAgility.Connector
             newDocId = null;
         }
 
-        void IDMSConnector.DocSelectFiles(DMSConnector.SelectType type,
+        void IDMSConnector.DocSelectFiles(SelectType type,
             int MenuIndex, out string[] docIds)
         {
             docIds = new string[0];
@@ -421,7 +463,6 @@ namespace PPDF.TotalAgility.Connector
         }
 
         // ── IDMSConnector: Property Page ──────────────────────────────────
-
         IPropertyPageHandler IDMSConnector.PropertyPageHandler
         {
             get { return this; }
@@ -456,7 +497,6 @@ namespace PPDF.TotalAgility.Connector
         }
 
         // ── Registry Helpers ──────────────────────────────────────────────
-
         private string LoadPlainSetting(string key)
         {
             using (RegistryKey rk = Registry.CurrentUser.OpenSubKey(REG_KEY))
@@ -491,9 +531,7 @@ namespace PPDF.TotalAgility.Connector
         }
 
         // ── COM Registration Helpers ──────────────────────────────────────
-
-        private static RegistryKey OpenOrCreateSubkey(RegistryKey parent,
-            string name)
+        private static RegistryKey OpenOrCreateSubkey(RegistryKey parent, string name)
         {
             RegistryKey rk = parent.OpenSubKey(name, true)
                           ?? parent.CreateSubKey(name);

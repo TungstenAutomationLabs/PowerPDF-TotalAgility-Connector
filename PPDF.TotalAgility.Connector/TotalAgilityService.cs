@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Text;
+using System.Threading.Tasks;
+using System.Windows.Forms;
 
 namespace PPDF.TotalAgility.Connector
 {
@@ -143,6 +145,205 @@ namespace PPDF.TotalAgility.Connector
         }
 
         #endregion
+
+
+
+        #region Federated and Windows AD Authentication
+
+        /// <summary>
+        /// Extracts the TotalAgility base URL from the SDK URL.
+        /// e.g. https://server/TotalAgility/Services/Sdk -> https://server/TotalAgility
+        ///      https://server.tungstencloud.com/Services/Sdk -> https://server.tungstencloud.com
+        /// </summary>
+        public string GetTaBaseUrl(string sdkUrl)
+        {
+            int idx = sdkUrl.TrimEnd('/').IndexOf("/Services/",
+                StringComparison.OrdinalIgnoreCase);
+            if (idx > 0) return sdkUrl.Substring(0, idx);
+
+            Uri uri = new Uri(sdkUrl);
+            return uri.Scheme + "://" + uri.Host +
+                   (uri.Port != 80 && uri.Port != 443 ? ":" + uri.Port : "");
+        }
+
+        /// <summary>
+        /// Logs on using Windows AD credentials.
+        /// Uses the current Windows username with empty password —
+        /// works when TotalAgility is configured to sync with Windows AD.
+        /// </summary>
+        public TASession LogOnWithWindowsAD(string userId)
+        {
+            string url = _sdkUrl + "/UserService.svc/json/LogOnWithWindowsAuthentication2";
+
+            var payload = new
+            {
+                logOnProtocol = 7,
+                unconditionalLogOn = true
+            };
+
+            string response = PostJsonWithWindowsAuth(url, JsonConvert.SerializeObject(payload));
+            JObject result = JObject.Parse(response);
+            JObject d = (JObject)result["d"];
+
+            if (d == null)
+                throw new Exception("Invalid response from LogOnWithWindowsAuthentication2.");
+
+            bool isValid = d["IsValid"]?.Value<bool>() ?? false;
+            if (!isValid)
+                throw new Exception("Windows AD logon failed. Ensure your Windows account is mapped in TotalAgility.");
+
+            return new TASession
+            {
+                SessionId = d["SessionId"]?.ToString(),
+                ResourceId = d["ResourceId"]?.ToString(),
+                DisplayName = d["DisplayName"]?.ToString(),
+                IsValid = isValid
+            };
+        }
+
+
+        private string PostJsonWithWindowsAuth(string url, string json)
+        {
+            var request = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
+            request.Method = "POST";
+            request.ContentType = "application/json";
+            request.UseDefaultCredentials = true;  // sends current Windows identity (NTLM/Kerberos)
+            request.PreAuthenticate = true;
+
+            byte[] bytes = Encoding.UTF8.GetBytes(json);
+            request.ContentLength = bytes.Length;
+            using (var stream = request.GetRequestStream())
+                stream.Write(bytes, 0, bytes.Length);
+
+            using (var response = (System.Net.HttpWebResponse)request.GetResponse())
+            using (var reader = new System.IO.StreamReader(response.GetResponseStream()))
+                return reader.ReadToEnd();
+        }
+
+
+        /// <summary>
+        /// Logs on using Federated Security (SAML/Azure AD).
+        /// Opens a WebView2 browser window — TotalAgility handles the SAML redirect.
+        /// Extracts SessionId from browser session storage after successful login.
+        /// </summary>
+        public TASession LogOnWithFederated(string taBaseUrl, IWin32Window owner)
+        {
+            string sessionId = null;
+            string logonUrl = taBaseUrl + "/Forms/Custom/logon.html";
+
+            System.Threading.Thread fedThread = new System.Threading.Thread(() =>
+            {
+                using (var browserForm = new System.Windows.Forms.Form())
+                {
+                    browserForm.Text = "TotalAgility — Federated Login";
+                    browserForm.Size = new System.Drawing.Size(600, 700);
+                    browserForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
+
+                    var webView = new Microsoft.Web.WebView2.WinForms.WebView2();
+                    webView.Dock = System.Windows.Forms.DockStyle.Fill;
+                    browserForm.Controls.Add(webView);
+
+                    browserForm.Shown += async (s, args) =>
+                    {
+                        try
+                        {
+                            string edgeFolder = System.IO.Path.Combine(
+                                Environment.GetFolderPath(
+                                    Environment.SpecialFolder.LocalApplicationData),
+                                "Microsoft", "Edge", "User Data");
+
+                            if (System.IO.Directory.Exists(edgeFolder))
+                            {
+                                var env = await Microsoft.Web.WebView2.Core
+                                    .CoreWebView2Environment
+                                    .CreateAsync(null, edgeFolder);
+                                await webView.EnsureCoreWebView2Async(env);
+                            }
+                            else
+                            {
+                                await webView.EnsureCoreWebView2Async(null);
+                            }
+                        }
+                        catch
+                        {
+                            await webView.EnsureCoreWebView2Async(null);
+                        }
+
+                        webView.CoreWebView2.Navigate(logonUrl);
+
+                        webView.CoreWebView2.NavigationCompleted += async (nav, navArgs) =>
+                        {
+                            string currentUrl = webView.CoreWebView2.Source;
+
+                            // Read session immediately when ProviderLogOnSucceeded=true
+                            if (currentUrl.Contains("ProviderLogOnSucceeded=true") ||
+                                currentUrl.Contains("GeneralWorkQueue"))
+                            {
+                                try
+                                {
+                                    string script = @"
+                                    (function() {
+                                        try {
+                                            var raw = window.sessionStorage.getItem('SESSION_ID');
+                                            if (raw) {
+                                                var parsed = JSON.parse(raw);
+                                                return parsed.value || '';
+                                            }
+                                            return '';
+                                        } catch(e) { return ''; }
+                                    })()";
+
+                                    string result = await webView.CoreWebView2
+                                        .ExecuteScriptAsync(script);
+                                    result = result?.Trim('"');
+
+                                    System.IO.File.AppendAllText(
+                                        @"C:\Temp\TAConnectorDebug.txt",
+                                        DateTime.Now + " | SessionId result: " + result + "\r\n");
+
+                                    if (!string.IsNullOrEmpty(result) &&
+                                        result != "null" && result != "")
+                                    {
+                                        sessionId = result;
+                                        browserForm.Invoke(
+                                            new Action(() => browserForm.Close()));
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    System.IO.File.AppendAllText(
+                                        @"C:\Temp\TAConnectorDebug.txt",
+                                        DateTime.Now + " | Script error: " + ex.Message + "\r\n");
+                                }
+                            }
+                        };
+                    };
+
+                    browserForm.ShowDialog(owner);
+                }
+            });
+
+            fedThread.SetApartmentState(System.Threading.ApartmentState.STA);
+            fedThread.Start();
+            fedThread.Join();
+            System.IO.File.AppendAllText(@"C:\Temp\TAConnectorDebug.txt", DateTime.Now + " | After Join — sessionId: " + (sessionId ?? "NULL") + "\r\n");
+
+            if (string.IsNullOrEmpty(sessionId))
+                throw new Exception(
+                    "Federated login failed or was cancelled.");
+
+            return new TASession
+            {
+                SessionId = sessionId,
+                IsValid = true,
+                DisplayName = "Federated User"
+            };
+        }
+
+        #endregion
+
+
+
 
         #region Step 2 — Get Processes
 

@@ -253,5 +253,7 @@ namespace PPDF.TotalAgility.Connector
             txtLog.AppendText(message + Environment.NewLine);
             txtLog.ScrollToCaret();
         }
+
+        
     }
 }
