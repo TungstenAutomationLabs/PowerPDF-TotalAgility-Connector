@@ -239,6 +239,19 @@ namespace PPDF.TotalAgility.Connector
                     browserForm.Size = new System.Drawing.Size(600, 700);
                     browserForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
 
+                    try
+                    {
+                        using (var stream = typeof(TotalAgilityService).Assembly.GetManifestResourceStream("PPDF.TotalAgility.Connector.Resources.Image_TA.png"))
+                        {
+                            if (stream != null)
+                            {
+                                using (var bmp = new System.Drawing.Bitmap(stream))
+                                    browserForm.Icon = System.Drawing.Icon.FromHandle(bmp.GetHicon());
+                            }
+                        }
+                    }
+                    catch { /* non-critical — falls back to default icon */ }
+
                     var webView = new Microsoft.Web.WebView2.WinForms.WebView2();
                     webView.Dock = System.Windows.Forms.DockStyle.Fill;
                     browserForm.Controls.Add(webView);
@@ -503,7 +516,8 @@ namespace PPDF.TotalAgility.Connector
                             MimeType   = "application/pdf"
                         }
                     },
-                    InputVariables = variables
+                    InputVariables = variables,
+                    FolderFields = new object[0]
                 }
             };
 
